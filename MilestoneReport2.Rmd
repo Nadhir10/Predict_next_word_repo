@@ -1,0 +1,151 @@
+---
+title: 'Peer-graded Assignment: Milestone Report'
+author: "Nadhir"
+date: "26 novembre 2017"
+output: html_document
+---
+
+```{r init1, echo=FALSE, warning=FALSE, message=FALSE}
+options(java.parameters = "- Xmx1024m")
+library(png)
+library(grid)
+```
+
+```{r init2, echo=FALSE, warning=FALSE, message=FALSE}
+library(RWeka)
+library(SnowballC)
+library(tm)
+library(readr)
+library(stringr)
+library(qdap)
+library(plyr)
+library(dplyr)
+library(ggplot2)
+```
+
+## Introduction
+The goal of this project is to present the main findings after exploring and cleaning the Capstone Dataset. We will present histograms of the most frequent words and pair of words in the sample data.
+
+## Source files and sampling
+We used the files "en_US.blogs.txt", "en_US.twitter.txt" and "en_US.news.txt" from the Capstone Dataset.  
+
+```{r general, warning=FALSE, message=FALSE, cache=TRUE}
+con1 <- file("C:/Users/ndd/Desktop/10-capstone/W1/final/en_US/en_US.blogs.txt", "r")
+lines1<-readLines(con1)
+close(con1)
+
+con2 <- file("C:/Users/ndd/Desktop/10-capstone/W1/final/en_US/en_US.twitter.txt", "r") 
+lines2<-readLines(con2, skipNul = TRUE)
+close(con2)
+
+con3<- file("C:/Users/ndd/Desktop/10-capstone/W1/final/en_US/en_US.news.txt", "rb")
+lines3<-read_lines(con3)
+close(con3)
+
+lblog<-length(lines1)
+ltwitter<-length(lines2)
+lnews<-length(lines3)
+
+wblog<-sum(str_count(lines1))
+wtwitter<-sum(str_count(lines2))
+wnews<-sum(str_count(lines3))
+
+recap<-data.frame(file=c("en_US.blogs.txt", "en_US.twitter.txt", "en_US.news.txt"),
+                  lines.count=c(lblog,ltwitter,lnews),
+                  word.count=c(wblog,wtwitter,wnews))
+
+print(recap)
+```  
+
+
+Due to computer memory limits, this analysis was performed on a representative sample of the data (approximetly 5%). 
+
+```{r sampling, warning=FALSE, message=FALSE, eval=FALSE}
+set.seed(2018)
+sample1 <- sample(lines1, round(length(lines1)*0.05,0))
+sample2 <- sample(lines2, round(length(lines2)*0.05,0))
+sample3 <- sample(lines3, round(length(lines3)*0.05,0))
+final.sample<-c(sample1, sample2, sample3)
+
+```  
+
+## Sample processing  
+While it is a critical task, cleaning text data can be very difficult.  
+Cleaning include :
+- lower-case letters (Example : "Work" --> "work")  
+- handling apostrophes ("'")   
+- replace contractions (Example : "doesn't" --> "does not")  
+- remove punctuation
+- remove numbers and all non letters characters  
+- remove common redundant words (example "a", "in", "and")  
+- remove un-necessary spaces
+
+```{r cleaning, warning=FALSE, message=FALSE, eval=FALSE}
+apost <- content_transformer(function(x) gsub("’", "'", x)) 
+apostj <- content_transformer(function(x) gsub("â€™", "'", x)) 
+
+docs <- VCorpus(VectorSource(final.sample))
+docs<-tm_map(docs,apost) %>%
+  tm_map(apostj)%>%
+  tm_map(tolower) %>% 
+  tm_map(replace_contraction) %>%
+  tm_map(str_replace_all,"\'[sS]", " ") %>% 
+  tm_map(removePunctuation) %>%
+  tm_map(str_replace_all,"[^A-z ]", " ") %>%
+  tm_map(removeWords, stopwords("english")) %>%
+  tm_map(stripWhitespace) %>% tm_map(PlainTextDocument)
+```  
+
+For example, handling apostrophes proved to be very tricky, because depending on the source, the encoding of the apostrophe changes : from "'" to "’" and even "â€™" (java script).
+
+## Tokenization
+Now that we have cleaned data, we can compute the frequency of each word or pair of successive words. Once we obtain the frequencies, every word or pair of words is called a token.
+
+```{r token, warning=FALSE, message=FALSE, cache=TRUE, eval=FALSE}
+tokenizer <- function(x) NGramTokenizer(x, Weka_control(min = 1, max = 2))
+tdm<-TermDocumentMatrix(docs, control = list(tokenize = tokenizer))
+m<-rowSums(as.matrix(tdm))
+freq<-data.frame(word=names(m), freq=m)
+```  
+
+## Exploratory analysis
+Next we will explore the result of this analysis, to see if the cleaning was good enough, and to check if the result looks normal.  
+We have to keep in mind that this work is a preperation for the prediction model, that can suggest words to a user typing a text. so the words with the highest frequency should be common words used regularly.
+### simple words
+Common words like "will" and "can" are the most frequent :
+```{r simple, warning=FALSE, message=FALSE, cache=TRUE, eval=FALSE}
+index<-grepl(freq$word, pattern = " ")
+freq1<-freq[-index,]
+result1<-head(arrange(freq1, desc(freq)),30)
+g<-ggplot(result1,aes(x=reorder(word,-freq), y=freq)) + 
+  geom_col(col="white", fill="blue")+labs(x="words", y="frequency") + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+g
+```  
+```{r simplgraph, echo=FALSE}
+img <- readPNG("C:/Users/ndd/Desktop/10-capstone/simple.png")
+grid.raster(img)
+```  
+
+
+### pair of words
+Common pairs like "i will" and "let us" have the highest frequency.
+the good thing to notice is that most of the pairs have a correct sens.  
+```{r bigram, warning=FALSE, message=FALSE, eval=FALSE}
+freq2<-freq[index,]
+result2<-head(arrange(freq2, desc(freq)),30)
+g<-ggplot(result2,aes(x=reorder(word,-freq), y=freq)) + 
+  geom_col(col="white", fill="blue")+labs(x="pair of words", y="frequency") + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+g
+
+``` 
+```{r bigramgraph, echo=FALSE}
+img <- readPNG("C:/Users/ndd/Desktop/10-capstone/bigram.png")
+grid.raster(img)
+
+```    
+
+## Prediction algorithm and app
+1- The prediction model would have to use these frequencies. In the app, as long as the user is typing, the app should respond with suggestions of the words that match all of part of the string already typed, with ordred with descending frequency.  
+2- When a user types a space (meaning that he finished his first word), the app should respond with the possible, also ordred with descending frequency. 
